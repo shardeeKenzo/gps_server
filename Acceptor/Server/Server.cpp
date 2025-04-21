@@ -3,119 +3,84 @@
 #include "Server.h"
 
 using boost::asio::ip::tcp;
-using namespace std;
 
-Server::Server(
-      const ServerConfig& aConfig
-) :   _ioServicePool(aConfig.poolSize)
-    , _signals(_ioServicePool.get_io_service())
-    , _acceptor(_ioServicePool.get_io_service())
-    , _newConnection()
+Server::Server(const ServerConfig& aConfig)
+  : ioPool_(aConfig.poolSize)
+  , signals_(ioPool_.get_io_service())
+  , acceptor_(ioPool_.get_io_service())
+  , ios_(ioPool_.get_io_service())
 {
     // Register to handle the signals that indicate when the server should exit.
     // It is safe to register for the same signal multiple times in a program,
     // provided all registration for the specified signal is made through Asio.
-    _signals.add(SIGINT);
-    _signals.add(SIGTERM);
+    signals_.add(SIGINT);
+    signals_.add(SIGTERM);
 
 #if defined(SIGQUIT)
-    _signals.add(SIGQUIT);
+    signals_.add(SIGQUIT);
 #endif // defined(SIGQUIT)
     
-    _signals.async_wait(boost::bind(&Server::handleStop, this));
+    signals_.async_wait([this](auto&&){ handleStop(); });
     
-    short res = PSQLHandler::connectToDB(
-          aConfig.psqlHost
-        , aConfig.psqlLogin
-        , aConfig.psqlDbName
-        , aConfig.psqlDbPass
-        , &_readCon
-    );
-    
-    if (res) {
-        cerr << "ERROR:Server::Server: could not open a connection to db"
-             << endl << flush;
-        exit(1);
+    readCon_  = std::make_unique<pqxx::connection>(
+                  "dbname="  + aConfig.psqlDbName +
+                  " host="   + aConfig.psqlHost  +
+                  " user="   + aConfig.psqlLogin +
+                  " password="+ aConfig.psqlDbPass);
+    if (!readCon_->is_open()) {
+        throw std::runtime_error("Failed to open read DB connection");
+    }
+
+    writeCon_ = std::make_unique<pqxx::connection>(
+                  "dbname="  + aConfig.psqlDbName +
+                  " host="   + aConfig.psqlHost  +
+                  " user="   + aConfig.psqlLogin +
+                  " password="+ aConfig.psqlDbPass);
+    if (!writeCon_->is_open()) {
+        throw std::runtime_error("Failed to open write DB connection");
     }
     
-    res = PSQLHandler::connectToDB(
-          aConfig.psqlHost
-        , aConfig.psqlLogin
-        , aConfig.psqlDbName
-        , aConfig.psqlDbPass
-        , &_writeCon
-    );
+    // Resolve endpoint and start acceptor
+    tcp::resolver resolver(ios_);
+    auto endpoints = resolver.resolve({aConfig.host, aConfig.port});
     
-    if (res) {
-        cerr << "Server::Server: could not open a connection to db"
-             << endl << flush;
-        exit(1);
-    }
+    acceptor_.open(endpoints->endpoint().protocol());
+    acceptor_.set_option(tcp::acceptor::reuse_address(true));
+    acceptor_.bind(endpoints->endpoint());
+    acceptor_.listen();
     
-    // Open the acceptor with the option to reuse the address (i.e. SO_REUSEADDR).
-    tcp::resolver        resolver(_acceptor.get_io_service());
-    tcp::resolver::query query(aConfig.host, aConfig.port);
-    
-    tcp::endpoint endpoint = *resolver.resolve(query);
-    
-    _acceptor.open(endpoint.protocol());
-    _acceptor.set_option(tcp::acceptor::reuse_address(true));
-    _acceptor.bind(endpoint);
-    _acceptor.listen();
-    
-    _storage.reset(new DataStorage(_readCon, _writeCon, &_mutex));
+    storage_ = std::make_unique<DataStorage>(
+        readCon_.get(), writeCon_.get(), &mutex_);
     
     startAccept();
 
     // start periodically sending data stored in RAM to db
-    boost::thread storageLoop(
-        boost::bind(
-              &DataStorage::run
-            , boost::ref(_storage)
-        )
-    );
-}
-
-Server::~Server() {
-    if (_readCon) {
-        _readCon->disconnect();
-        delete _readCon;
-    }
-    if (_writeCon) {
-        _writeCon->disconnect();
-        delete _writeCon;
-    }
-
-    _storage.reset();
+    std::thread([this] { storage_->run(); }).detach();
 }
 
 void Server::run() {
-    _ioServicePool.run();
+    ioPool_.run();
 }
 
 void Server::startAccept() {
-    _newConnection.reset(new Connection(
-          _ioServicePool.get_io_service()
-        , Auth_ptr(new Authorization(_readCon, _writeCon, &_mutex))
-        , _storage.get()
-    ));
+    newConnection_ = std::make_shared<Connection>(
+        ios_,
+        std::make_shared<Authorization>(
+            readCon_.get(), writeCon_.get(), &mutex_),
+        storage_.get());
 
-    _acceptor.async_accept(
-        _newConnection->socket(),
-        boost::bind(
-            &Server::handleAccept,
-            this,
-            boost::asio::placeholders::error
-        )
-    );
+    acceptor_.async_accept(
+        newConnection_->socket(),
+        [this](auto&& ec) { handleAccept(ec); });
 }
 
-void Server::handleAccept(const boost::system::error_code& e) {
-    if (!e) _newConnection->listen();
-
+void Server::handleAccept(const boost::system::error_code& ec) {
+    if (!ec) {
+        newConnection_->listen();
+    }
     startAccept();
 }
 
 void Server::handleStop() {
-    _ioServicePool.stop();
+    ioPool_.stop();
 }
