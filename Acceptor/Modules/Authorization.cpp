@@ -1,68 +1,53 @@
-#include <crypt.h>
-#include <time.h>
-#include <iostream>
-
-#include <boost/thread/mutex.hpp>
-
 #include "Authorization.h"
 #include "PSQLHandler.h"
-
 #include "utils.hpp"
+#include "Logger.hpp"
+
+#include <crypt.h>
+#include <iostream>
 
 Authorization::Authorization(
-    pqxx::connection* aReadCon,
-    pqxx::connection* aWriteCon,
-    boost::mutex* aMutex
-)
+    pqxx::connection* readCon,
+    pqxx::connection* writeCon,
+    std::mutex*       mtx)
+  : _readCon{ readCon }
+  , _writeCon{ writeCon }
+  , _mutex{ mtx }
 {
-    if (!aReadCon || !aWriteCon) {
-        cerr << "Connection::Connection: An attempt to make a connection "
-             << "with null pointer to pqxx::connection was made" << endl << flush;
-        exit(1);
-        // TERMINATION
+    if (!_readCon || !_writeCon || !_mutex) {
+        throw std::invalid_argument("Authorization: null pointer in ctor");
     }
-
-    _readCon    = aReadCon;
-    _writeCon   = aWriteCon;
-    _mutex      = aMutex;
-
-    _authorized = false;
-
-    _transportID = -1;
-    _imei       = "";
-
 }
 
-Authorization::~Authorization() {
-    // EMPTY
-}
+Authorization::~Authorization() = default;
 
 /*!
  * \brief Authorization::authorize
- * \param anImei
- * \param aPassword
+ * \param imei
+ * \param password
  * \return
  */
-bool Authorization::authorize(string anImei, string aPassword) {
-    AuthData data;
+bool Authorization::authorize(const std::string& imei,
+                              const std::string& password)
+{
     string dbHash, resultHash;
 
-    boost::mutex::scoped_lock lock(*_mutex);
+    std::lock_guard<std::mutex> lock(*_mutex);
 
     work xact(*_readCon);
-    data = PSQLHandler::getCryptedPassword(anImei, xact);
+    AuthData data = PSQLHandler::getCryptedPassword(imei, xact);
     
     // -- заплатка - добавление записи если нету ----------------------
     
     if(data.transportID == -1) {
-        data = PSQLHandler::addSensor(anImei, xact);
+        data = PSQLHandler::addSensor(imei, xact);
 	work xact2(*_readCon);//xact was closed after comit
-	data = PSQLHandler::getCryptedPassword(anImei, xact2);
+	data = PSQLHandler::getCryptedPassword(imei, xact2);
     }
     
 //    dbHash  = data.passwordHash;
     
-    _imei   = anImei;
+    _imei   = imei;
     _transportID = data.transportID;
 
     
@@ -83,8 +68,8 @@ bool Authorization::authorize(string anImei, string aPassword) {
 //                   << " registered successfully"     << endl;
 //     else     cout << "device " << anImei
 //                   << " provided wrong account data" << endl;
-    
-    bool res = data.transportID != -1;
+
+    const bool res = data.transportID != -1;
     
     if (!res) pushError(WRONG_PASSWORD, "Authorization::authorize");
     else      _authorized = true;

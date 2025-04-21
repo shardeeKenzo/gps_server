@@ -47,8 +47,8 @@ private:
     boost::asio::io_service&         ios_;
     std::shared_ptr<Connection>      newConnection_;
 
-    std::unique_ptr<pqxx::connection> readCon_;
-    std::unique_ptr<pqxx::connection> writeCon_;
+    std::shared_ptr<pqxx::connection> readCon_;
+    std::shared_ptr<pqxx::connection> writeCon_;
 
     std::mutex                       mutex_;
     std::unique_ptr<DataStorage>     storage_;

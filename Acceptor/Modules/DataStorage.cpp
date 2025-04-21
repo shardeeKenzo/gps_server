@@ -1,127 +1,129 @@
-#include <vector>
-#include <iostream>
-#include <sstream>
-#include <boost/thread.hpp>
-#include <boost/bind.hpp>
-#include <boost/thread/mutex.hpp>
-#include <unistd.h>
-
 #include "DataStorage.h"
 #include "PSQLHandler.h"
 #include "Logger.hpp"
 #include "utils.hpp"
 
 DataStorage::DataStorage(
-      pqxx::connection *aRreadCon
-    , pqxx::connection *aWriteCon
-    , boost::mutex     *aMutex
-)
+    std::shared_ptr<pqxx::connection> readCon,
+    std::shared_ptr<pqxx::connection> writeCon,
+    const std::chrono::seconds flushInterval)
+  : writeCon_{ std::move(writeCon) }
+  , running_{ false }
+  , flushInterval_{ flushInterval }
 {
-    if (!aWriteCon || !aMutex) {
-        // TODO: remake with error code
-        cerr << "DataStorage::DataStorage: pointer to connection or mutex is null"
-             << endl << flush;
-        exit(1);
-        // NOTREACHED
+    if (!writeCon_ || !writeCon_->is_open()) {
+        throw std::invalid_argument("DataStorage: invalid writeCon");
     }
-
-    _writeCon   = aWriteCon;
-    _readCon    = aRreadCon;
-    _readMutex  = aMutex;
-
-    _purgingInProgress = false;
 }
 
 DataStorage::~DataStorage() {
-    if (!_points.empty()) {
-        _pointsCopy = _points;
-        uploadPoints();
-    }
+    stop();
 }
 
-[[noreturn]] void
-DataStorage::run() {
-    for (;;) {
-        usleep(SLEEP_DELAY);
-        if (!_points.empty()) {
-            _pointsCopy = _points;
+void DataStorage::run() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (running_) {
+        // Wait until either timeout or notified of new data/stop
+        cv_.wait_for(lock, flushInterval_, [this] {
+            return !running_ || !points_.empty();
+        });
 
-            _purgingInProgress = true;
-            _points.clear();
-            _purgingInProgress = false;
+        if (!points_.empty()) {
+            // Swap buffer under lock
+            std::vector<Point> toUpload;
+            toUpload.swap(points_);
+            lock.unlock();
 
-             uploadPoints();
-             BOOST_LOG(logger) << getTimeString() << "Uploaded " << _pointsCopy.size() << " points to db."  << endl;
+            // Perform upload outside lock
+            {
+                work xact(*writeCon_);
+                short res = PSQLHandler::uploadPoints(toUpload, xact);
+                if (res == 0) {
+                    xact.commit();
+                    BOOST_LOG(logger) << getTimeString()
+                                      << " Uploaded " << toUpload.size()
+                                      << " points to DB.";
+                } else {
+                    BOOST_LOG(logger) << getTimeString()
+                                      << " Error uploading batch of "
+                                      << toUpload.size() << " points.";
+                }
+            }
 
-            _purgingInProgress = true;
-            _pointsCopy.clear();
-            _purgingInProgress = false;
+            lock.lock();
         }
+    }
+
+    // Final flush before exit
+    if (!points_.empty()) {
+        lock.unlock();
+        uploadPoints();
+        lock.lock();
     }
 }
 
 /*!
  * \brief Store point data in RAM for further uploading to database
- * \param aTransportID   - sensor id in database
- * \param aTokenMap - map of tokens got from data package
- * \return 0 - error
- *         1 - success
+ * \param transportID   - sensor id in database
+ * \param tokenMap - map of tokens got from data package
  */
-short
-DataStorage::store(int aTransportID, TokenMap aTokenMap) {
+bool DataStorage::store(const int transportID, const TokenMap& tokenMap) {
     Point p;
-
-    p.transportID = aTransportID;
+    p.transportID = transportID;
 
     try {
-        p.lat       = stoi(aTokenMap["lat"]);
-        p.lon       = stoi(aTokenMap["lon"]);
-        p.alt       = stoi(aTokenMap["alt"]);
-        p.speed     = stoi(aTokenMap["speed"]);
-        p.direction = stoi(aTokenMap["direction"]);
-        p.satcnt    = stoi(aTokenMap["satcnt"]);
-        p.time      = stol(aTokenMap["time"]);
-    } catch(const std::invalid_argument e) {
-        return 0;
-        // NOTREACHED
-    } catch(const std::out_of_range e) {
-        return 0;
-        // NOTREACHED
+        p.lat       = std::stoi(tokenMap.at("lat"));
+        p.lon       = std::stoi(tokenMap.at("lon"));
+        p.alt       = std::stoi(tokenMap.at("alt"));
+        p.speed     = std::stoi(tokenMap.at("speed"));
+        p.direction = std::stoi(tokenMap.at("direction"));
+        p.satcnt    = std::stoi(tokenMap.at("satcnt"));
+        p.time      = std::stol(tokenMap.at("time"));
+    } catch (const std::exception&) {
+        return false;
     }
+    p.signal = false;  // placeholder
 
-    // not sure what to be held here
-    // PLACEHOLDER
-    p.signal = false;
-//    BOOST_LOG(logger) << getTimeString() << "DataStorage::store mutex locked";
-    boost::mutex::scoped_lock lock(_writeMutex);
-//    BOOST_LOG(logger) << getTimeString() << "DataStorage::store mutex unlocked";
-
-    while (_purgingInProgress) usleep(1);
-
-    _points.push_back(p);
-//    BOOST_LOG(logger) << getTimeString() << "Point cached in RAM storage";
-
-    return 1;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        points_.emplace_back(p);
+    }
+    cv_.notify_one();
+    return true;
 }
 
-void
-DataStorage::uploadPoints() {
-//    BOOST_LOG(logger) << getTimeString() << "DataStorage::uploadPoints mutex locked";
-    boost::mutex::scoped_lock lock(_writeMutex);
-//    BOOST_LOG(logger) << getTimeString() << "DataStorage::uploadPoints mutex unlocked";
+void DataStorage::start() {
+    running_ = true;
+    thread_ = std::thread(&DataStorage::run, this);
+}
 
-    work xact(*_writeCon);
-    short res = PSQLHandler::uploadPoints(_pointsCopy, xact);
-    if (!res) {
+void DataStorage::stop() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        running_ = false;
+    }
+    cv_.notify_one();
+    if (thread_.joinable())
+        thread_.join();
+}
+
+void DataStorage::uploadPoints() {
+    // Called only when holding lock, but no points on entry guard should be before call
+    if (points_.empty()) return;
+
+    // Swap and upload
+    std::vector<Point> toUpload;
+    toUpload.swap(points_);
+    work xact(*writeCon_);
+    short res = PSQLHandler::uploadPoints(toUpload, xact);
+    if (res == 0) {
         xact.commit();
-        BOOST_LOG(logger) << getTimeString() << "Pack of points was successfully uploaded to db." << endl << endl << endl;
-    }
-    else {
-        // TODO: remake with error codes
-        BOOST_LOG(logger) <<  getTimeString() << "Error has occured during uploading to db." << endl << endl << endl;
+        BOOST_LOG(logger) << getTimeString()
+                          << " Final upload of " << toUpload.size()
+                          << " points.";
+    } else {
+        BOOST_LOG(logger) << getTimeString()
+                          << " Error on final upload.";
     }
 }
 
-//
-//
-//

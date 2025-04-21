@@ -1,45 +1,63 @@
 #ifndef DATA_STORAGE_H
 #define DATA_STORAGE_H
 
-#define SLEEP_DELAY 15000000
+
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #include <pqxx/pqxx>
-#include <boost/thread/mutex.hpp>
-#include <sstream>
 
 #include "DataTypes.h"
 
 using namespace std;
 
+/// Buffers incoming GPS points in memory and periodically flushes them to PostgreDB.
 class DataStorage
 {
 public:
-    DataStorage(
-          pqxx::connection *aRreadCon
-        , pqxx::connection *aWriteCon
-        , boost::mutex     *aMutex
-    );
-    virtual ~DataStorage();
+    /// @param readCon   Shared connection for reads.
+    /// @param writeCon  Shared connection for writes.
+    /// @param flushInterval How often to flush the buffer to the database.
+    DataStorage(std::shared_ptr<pqxx::connection> readCon,
+                std::shared_ptr<pqxx::connection> writeCon,
+                std::chrono::seconds flushInterval = std::chrono::seconds(15));
+
+    ~DataStorage();
     
-    short store(int aTransportID, TokenMap aTokenMap);
-    void uploadPoints();
-    void run();
+    /// Cache a new Point parsed from a token map.
+    /// @returns true on success; false on parse error.
+    bool store(int transportID, const TokenMap& tokenMap);
+
+    /// Start the background flushing thread.
+    void start();
+
+    /// Stop the background thread and flush any remaining points.
+    void stop();
     
 private:
-    pqxx::connection* _writeCon;
-    pqxx::connection* _readCon;
-    boost::mutex*     _readMutex;
-    boost::mutex      _writeMutex;
-    vector<Point>     _points;
-    vector<Point>     _pointsCopy;
+
+    /// The background loop: wait for either flushInterval or a stop signal.
+    void run();
+
+    /// Flush the current buffer to the database (called under lock).
+    void uploadPoints();
+
+    std::shared_ptr<pqxx::connection> writeCon_;
+    std::shared_ptr<pqxx::connection> readCon_;
+    std::mutex                        mutex_;
+    std::condition_variable           cv_;
+    std::thread                       thread_;
+    bool                              running_;
+
+
+    std::chrono::seconds              flushInterval_;
+    std::vector<Point>                points_;
 //    vector<Transport> _transports;
 //    vector<Transport> _transports_copy;
-
-    bool              _purgingInProgress;
 };
 
 #endif // DATA_PROCESSOR_H
 
-//
-//
-//

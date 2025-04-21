@@ -5,10 +5,10 @@
 using boost::asio::ip::tcp;
 
 Server::Server(const ServerConfig& aConfig)
-  : ioPool_(aConfig.poolSize)
-  , signals_(ioPool_.get_io_service())
-  , acceptor_(ioPool_.get_io_service())
-  , ios_(ioPool_.get_io_service())
+  : ioPool_ { aConfig.poolSize }
+  , signals_{ ioPool_.get_io_service() }
+  , acceptor_{ ioPool_.get_io_service() }
+  , ios_{ ioPool_.get_io_service() }
 {
     // Register to handle the signals that indicate when the server should exit.
     // It is safe to register for the same signal multiple times in a program,
@@ -50,12 +50,13 @@ Server::Server(const ServerConfig& aConfig)
     acceptor_.listen();
     
     storage_ = std::make_unique<DataStorage>(
-        readCon_.get(), writeCon_.get(), &mutex_);
+        readCon_,
+        writeCon_
+    );
+
+    storage_->start();
     
     startAccept();
-
-    // start periodically sending data stored in RAM to db
-    std::thread([this] { storage_->run(); }).detach();
 }
 
 void Server::run() {
@@ -64,10 +65,10 @@ void Server::run() {
 
 void Server::startAccept() {
     newConnection_ = std::make_shared<Connection>(
-        ios_,
-        std::make_shared<Authorization>(
-            readCon_.get(), writeCon_.get(), &mutex_),
-        storage_.get());
+       ios_,
+       std::make_shared<Authorization>(
+           readCon_.get(), writeCon_.get(), &mutex_),
+            storage_.get());
 
     acceptor_.async_accept(
         newConnection_->socket(),
