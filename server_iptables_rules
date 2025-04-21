@@ -1,0 +1,12 @@
+iptables -D FORWARD -o virbr0 -j REJECT --reject-with icmp-port-unreachable
+iptables -D FORWARD -i virbr0 -j REJECT --reject-with icmp-port-unreachable
+
+# for responder
+iptables -A FORWARD -i eth0 -p tcp --dport 20333 -d 192.168.122.164 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 20333 -j DNAT --to 192.168.122.164:20333
+
+# for acceptor
+iptables -A FORWARD -i eth0 -p tcp --dport 20332 -d 192.168.122.164 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 20332 -j DNAT --to 192.168.122.164:20332

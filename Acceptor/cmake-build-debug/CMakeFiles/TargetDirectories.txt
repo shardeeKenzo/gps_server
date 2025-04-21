@@ -1,0 +1,8 @@
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/test_teltonica.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/GpsAcceptor.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/list_install_components.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/install.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/install/local.dir
+/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug/CMakeFiles/install/strip.dir

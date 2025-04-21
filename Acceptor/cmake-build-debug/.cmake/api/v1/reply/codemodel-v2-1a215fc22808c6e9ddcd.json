@@ -1,0 +1,70 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-Debuge-11c641c8a4c4d06b9fa7.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"name" : "Debuge",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "GpsAcceptor",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "GpsAcceptor::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-GpsAcceptor-Debuge-8f69fdb5c72846221ced.json",
+					"name" : "GpsAcceptor",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "test_teltonica::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-test_teltonica-Debuge-bdeaf881056a6a446754.json",
+					"name" : "test_teltonica",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/shardee_/Downloads/gps-server-master (2)/Acceptor/cmake-build-debug",
+		"source" : "/home/shardee_/Downloads/gps-server-master (2)/Acceptor"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 7
+	}
+}

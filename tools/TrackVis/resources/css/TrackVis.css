@@ -1,0 +1,74 @@
+body {
+    height: 100%;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+
+.focusedMarker {
+    color               :   #EDF1FF;
+    text-align          :   center;
+    background          :   #18A5E9;
+    border              :   1px solid #636363;
+    border-radius       :   13px;
+    -moz-border-radius  :   10px;
+    font-size           :   10px   
+}
+
+.selectedMarker {
+    color               :   #636363;
+    text-align          :   center;
+    background          :   #74F77F;
+    border              :   1px solid #636363;
+    border-radius       :   10px;
+    -moz-border-radius  :   10px;
+    font-size           :   10px   
+}
+
+.unselectedMarker {
+    color               :   #2D2D2D;
+    text-align          :   center;
+    background          :   #A9A9A9;
+    border              :   1px solid #636363;
+    border-radius       :   8px;
+    -moz-border-radius   :   8px;
+    font-size           :   9px   
+}
+
+.control-panel {
+    position            : absolute;
+    top                 : 10px;
+    left                : 50px;
+    width               : 120px;
+    height              : 100px;
+    background-color    : rgba(255,255,255,255) !important;
+    margin              : 10px !important;
+    padding-left        : 30px !important;
+    padding-top         : 20px !important;
+    font-size           : 10pt !important;
+}
+
+#clasterID {
+    text-align          : center;
+    width               : 74px;
+    height              : 15px;
+    background-color    : #FFFFFF !important;
+}
+
+#leftPath {
+    width               : 30px;
+}
+
+#rightPath {
+    width               : 30px;
+}
+
+#leftTask {
+    width               : 30px;
+}
+
+#rightTask {
+    width               : 30px;
+}
+

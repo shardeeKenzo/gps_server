@@ -1,0 +1,81 @@
+<html>
+<head>
+	<meta charset = "utf-8" />	
+	<meta http-equiv = "X-UA-Compatible" content = "IE = edge, chrome = 1" />
+	<title>path visualizer</title>
+	
+	<!--stylesheets-->
+	<link rel = "stylesheet" type = "text/css" href = "resources/css/leaflet.css" />
+	<link rel = "stylesheet" type = "text/css" href = "resources/css/leaflet.ie.css" />
+	<link rel = "stylesheet" type = "text/css" href = "resources/css/w2ui-1.2.css" />
+	<link rel = "stylesheet" type = "text/css" href = "resources/css/TrackVis.css" />
+	<!--frameworks-->
+	<script type = "text/javascript" charset="utf-8" src="resources/js/leaflet.js"></script>
+    <script type = "text/javascript" charset="utf-8" src="resources/js/utils.js"></script>
+	<script type = "text/javascript" charset="utf-8" src="resources/js/TrackVis.js"></script>
+    <script type = "text/javascript" charset="utf-8" src="resources/js/jquery.min.js"></script>
+    <script type = "text/javascript" charset="utf-8" src="resources/js/w2ui-1.2.js"></script>
+	<script type = "text/javascript" charset="utf-8" src="gpsdata.js"></script>
+	
+</head>
+	<body>
+    <div id = "pageHolder" style = "overflow: hidden;">
+        <div id = "layout" style="width: 100%; height: 800px"></div>
+    </div>
+<script>
+    
+// -----------------------------------------------------------------------------
+$('#layout').w2layout({
+    name: 'layout',
+    panels: [
+        { type: 'right', size: 600, resizable: true, hidden: true },
+        { type: 'main' }
+    ]
+});
+
+w2ui['layout'].content('main', '<div id = "map" style = "width: 100%; height: 100%;">ffffuuuu</div>'
+    + '<div id = "control-panel" class = "w2ui-buttons control-panel">'
+    + '<input type = "button" value = "←" id = "goLeft">'
+    + '<input type = "button" value = "→" id = "goRight">'
+    + '<div id = "packID" style = "padding: 5px;">pack: 0</div>'
+    + '<input type = "button" value = "all" id = "showAll">'
+    + '</div>');
+
+$('#layout').height($(window).height());
+$(window).resize(function() {
+    $('#layout').height($(window).height());
+});
+
+
+map = new L.Map(
+    "map", {
+        center: new L.LatLng(50.455002, 30.511284),
+        zoom: 9,
+        layers : [
+            new L.TileLayer(
+                'http://tms{s}.visicom.ua/1.0.3/world_ru/{z}/{x}/{y}.png',
+                {
+                    maxZoom: 18,
+                    tms : true,
+                    attribution : 'Данные компании © <a href="http://visicom.ua/">Визиком</a>',
+                    subdomains : '123'
+                }
+            )
+        ]
+    }
+);
+
+init();
+
+map.on("click", function() {
+    if (w2ui["infoTable"]) {
+        toggleSideBar();
+    }
+})
+
+map.on("contextmenu", toggleSideBarEvent, this);
+</script>
+	
+</body>
+
+</html>

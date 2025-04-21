@@ -1,0 +1,26 @@
+build:
+  stage: build
+  script:
+    - mkdir -p Acceptor/build
+    - cd Acceptor/build
+    - cmake ..
+    - make
+  cache:
+    paths:
+      - Acceptor/build/
+  artifacts:
+    paths:
+      - Acceptor/build/GpsAcceptor
+    expire_in: 6 mos
+
+deploy:
+  stage: deploy
+  variables:
+    DST_HOST: "gps.local"
+  script:
+    - ssh root@$DST_HOST service gps_tracker stop
+    - sleep 5
+    - "scp Acceptor/build/GpsAcceptor root@$DST_HOST:/opt/gps_tracker/GpsAcceptor"
+    - ssh root@$DST_HOST service gps_tracker start
+  when: manual
+  environment: production
