@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <PSQLHandler.h>
 #include <thread>
 #include <vector>
 
@@ -51,6 +52,8 @@ private:
     std::condition_variable           cv_;
     std::thread                       thread_;
     bool                              running_;
+
+    PSQLHandler                       psql_;
 
 
     std::chrono::seconds              flushInterval_;

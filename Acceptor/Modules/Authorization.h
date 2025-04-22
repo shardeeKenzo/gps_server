@@ -2,35 +2,47 @@
 #define AUTHORIZATION_H
 
 #include <string>
-#include <pqxx/pqxx>
+#include <memory>
 #include <mutex>
+#include "DataTypes.h"
+#include "PSQLHandler.h"
 
+/// Manages device authorization and auto‑registration using PSQLHandler.
 class Authorization
 {
 public:
+    /**
+     * @param handler Shared PSQLHandler for database operations.
+     * @param mtx     Pointer to a std::mutex for serializing DB access.
+     * @throws std::invalid_argument if handler or mtx is null.
+     */
+    Authorization(std::shared_ptr<PSQLHandler> handler,
+                  std::mutex*                  mtx);
 
-    /// @param readCon   Shared connection for lookups.
-    /// @param writeCon  Shared connection for inserts/updates.
-    /// @param mtx       Pointer to a std::mutex guarding DB access.
-    Authorization(pqxx::connection* readCon,
-                  pqxx::connection* writeCon,
-                  std::mutex*       mtx);
+    ~Authorization() = default;
 
-    ~Authorization();
-
-    /// Returns true if device with IMEI+password is authorized.
+    /**
+     * @brief Authorize a device by IMEI and password.
+     *        If IMEI not known, auto-registers a new transport.
+     * @param imei     Device IMEI string.
+     * @param password Plaintext password.
+     * @return true if authorization (or auto-registration) succeeded.
+     * @throws std::runtime_error on DB errors.
+     */
     bool authorize(const std::string& imei,
                    const std::string& password);
 
-    bool _authorized { false };
-    int  _transportID { -1 };
-    std::string _imei;
+    bool isAuthorized() const { return _authorized; }
+    int  transportID()  const { return _transportID; }
+    const std::string& imei() const { return _imei; }
 
 private:
-    pqxx::connection* _readCon;
-    pqxx::connection* _writeCon;
+    std::shared_ptr<PSQLHandler> _psql;  ///< Handler for DB calls
+    std::mutex*                  _mutex; ///< Mutex for DB access
 
-    std::mutex* _mutex;;
+    bool         _authorized{false};     ///< Authorization flag
+    int          _transportID{-1};       ///< Transport ID from DB
+    std::string  _imei;                  ///< Last IMEI authorized;
 };
 
 using Auth_ptr = std::shared_ptr<Authorization>;

@@ -1,25 +1,18 @@
 #include "Authorization.h"
-#include "PSQLHandler.h"
-#include "utils.hpp"
 #include "Logger.hpp"
+#include "utils.hpp"
 
+#include <stdexcept>
 #include <crypt.h>
-#include <iostream>
 
-Authorization::Authorization(
-    pqxx::connection* readCon,
-    pqxx::connection* writeCon,
-    std::mutex*       mtx)
-  : _readCon{ readCon }
-  , _writeCon{ writeCon }
-  , _mutex{ mtx }
+Authorization::Authorization(std::shared_ptr<PSQLHandler> handler,
+                             std::mutex*                  mtx)
+  : _psql{std::move(handler)}, _mutex{mtx}
 {
-    if (!_readCon || !_writeCon || !_mutex) {
-        throw std::invalid_argument("Authorization: null pointer in ctor");
+    if (!_psql || !_mutex) {
+        throw std::invalid_argument("Authorization: handler or mutex is null");
     }
 }
-
-Authorization::~Authorization() = default;
 
 /*!
  * \brief Authorization::authorize
@@ -30,49 +23,37 @@ Authorization::~Authorization() = default;
 bool Authorization::authorize(const std::string& imei,
                               const std::string& password)
 {
-    string dbHash, resultHash;
-
     std::lock_guard<std::mutex> lock(*_mutex);
+    // Open a transaction
+    const auto conn = _psql->connection();
+    pqxx::work tx(*conn);
 
-    work xact(*_readCon);
-    AuthData data = PSQLHandler::getCryptedPassword(imei, xact);
-    
-    // -- заплатка - добавление записи если нету ----------------------
-    
-    if(data.transportID == -1) {
-        data = PSQLHandler::addSensor(imei, xact);
-	work xact2(*_readCon);//xact was closed after comit
-	data = PSQLHandler::getCryptedPassword(imei, xact2);
+    // 1) Fetch or create transport
+    AuthData data = _psql->fetchPassword(imei, tx);
+    if (data.transportID < 0) {
+        data = _psql->addSensor(imei, tx);
     }
-    
-//    dbHash  = data.passwordHash;
-    
-    _imei   = imei;
+
+    // 2) (Placeholder) password verification logic
+    // std::string dbHash = data.passwordHash;
+    // std::string resultHash = crypt(password.c_str(), dbHash.c_str());
+    // bool ok = (dbHash == resultHash);
+    bool ok = (data.transportID >= 0);
+
+    if (!ok) {
+        pushError(WRONG_PASSWORD, "Authorization::authorize");
+        tx.abort();
+        return false;
+    }
+
+    // Commit any new sensor insertion
+    tx.commit();
+
+    _imei = imei;
     _transportID = data.transportID;
+    _authorized = true;
 
-    
-    // -- убираем авторизацию ------------------------------------------
-    
-//     if (!dbHash.length() || -1 == _userID) return false;
-//     // NOTREACHED
-//     
-//     resultHash = crypt(aPassword.c_str(), dbHash.c_str());
-//     
-//     bool res = !dbHash.compare(resultHash);
-//     
-//     if (!res) pushError(WRONG_PASSWORD, "Authorization::authorize");
-//     else      _authorized = true;
-//     
-//     // DEBUG
-//     if (res) cout << "device " << anImei
-//                   << " registered successfully"     << endl;
-//     else     cout << "device " << anImei
-//                   << " provided wrong account data" << endl;
-
-    const bool res = data.transportID != -1;
-    
-    if (!res) pushError(WRONG_PASSWORD, "Authorization::authorize");
-    else      _authorized = true;
-    
-    return res;
+    BOOST_LOG(logger) << "Authorized IMEI " << imei
+                      << " as transport " << _transportID;
+    return true;
 }

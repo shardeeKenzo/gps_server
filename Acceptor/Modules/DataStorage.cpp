@@ -7,10 +7,10 @@ DataStorage::DataStorage(
     std::shared_ptr<pqxx::connection> readCon,
     std::shared_ptr<pqxx::connection> writeCon,
     const std::chrono::seconds flushInterval)
-  : writeCon_{ std::move(writeCon) }
-  , running_{ false }
-  , flushInterval_{ flushInterval }
-{
+    : writeCon_{std::move(writeCon)}
+      , running_{false}
+      , psql_{ writeCon_ }
+      ,flushInterval_{flushInterval} {
     if (!writeCon_ || !writeCon_->is_open()) {
         throw std::invalid_argument("DataStorage: invalid writeCon");
     }
@@ -23,38 +23,38 @@ DataStorage::~DataStorage() {
 void DataStorage::run() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (running_) {
-        // Wait until either timeout or notified of new data/stop
+        // Wake on timeout or new data/stop
         cv_.wait_for(lock, flushInterval_, [this] {
             return !running_ || !points_.empty();
         });
 
         if (!points_.empty()) {
-            // Swap buffer under lock
+            // Move data out under lock
             std::vector<Point> toUpload;
             toUpload.swap(points_);
             lock.unlock();
 
-            // Perform upload outside lock
-            {
-                work xact(*writeCon_);
-                short res = PSQLHandler::uploadPoints(toUpload, xact);
-                if (res == 0) {
-                    xact.commit();
-                    BOOST_LOG(logger) << getTimeString()
-                                      << " Uploaded " << toUpload.size()
-                                      << " points to DB.";
-                } else {
-                    BOOST_LOG(logger) << getTimeString()
-                                      << " Error uploading batch of "
-                                      << toUpload.size() << " points.";
-                }
+            // Perform upload
+            try {
+                pqxx::work xact(*writeCon_);
+                psql_.uploadPoints(toUpload, xact);
+                xact.commit();
+                BOOST_LOG(logger) << getTimeString()
+                                  << " Uploaded " << toUpload.size()
+                                  << " points to DB.";
+            }
+            catch (const std::exception& e) {
+                BOOST_LOG(logger) << getTimeString()
+                                  << " Error uploading batch of "
+                                  << toUpload.size()
+                                  << " points: " << e.what();
             }
 
             lock.lock();
         }
     }
 
-    // Final flush before exit
+    // Final flush on shutdown
     if (!points_.empty()) {
         lock.unlock();
         uploadPoints();
@@ -108,22 +108,26 @@ void DataStorage::stop() {
 }
 
 void DataStorage::uploadPoints() {
-    // Called only when holding lock, but no points on entry guard should be before call
     if (points_.empty()) return;
 
-    // Swap and upload
+    // Swap and upload remaining points
     std::vector<Point> toUpload;
-    toUpload.swap(points_);
-    work xact(*writeCon_);
-    short res = PSQLHandler::uploadPoints(toUpload, xact);
-    if (res == 0) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        toUpload.swap(points_);
+    }
+
+    try {
+        pqxx::work xact(*writeCon_);
+        psql_.uploadPoints(toUpload, xact);
         xact.commit();
         BOOST_LOG(logger) << getTimeString()
                           << " Final upload of " << toUpload.size()
                           << " points.";
-    } else {
+    }
+    catch (const std::exception& e) {
         BOOST_LOG(logger) << getTimeString()
-                          << " Error on final upload.";
+                          << " Error on final upload: " << e.what();
     }
 }
 

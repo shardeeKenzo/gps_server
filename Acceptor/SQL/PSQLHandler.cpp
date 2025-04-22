@@ -1,228 +1,78 @@
-#include <pqxx/pqxx>
-#include <iostream>
-
 #include "PSQLHandler.h"
-#include "utils.hpp"
 #include "Logger.hpp"
+#include <stdexcept>
 
-using namespace std;
-using namespace pqxx;
-
-
-PSQLHandler::PSQLHandler() {
-    // EMPTY CONSTRUCTOR
-}
-
-PSQLHandler::~PSQLHandler() {
-    // EMPTY
-}
-
-/*!
- * \brief PSQLHandler::connectToDB
- * \param aHostName
- * \param aUserName
- * \param aDBName
- * \param aDBPass
- * \return
- */
-short
-PSQLHandler::connectToDB(
-      const string& aHostName
-    , const string& aUserName
-    , const string& aDBName
-    , const string& aDBPass
-    , pqxx::connection** aCon
-)
+PSQLHandler::PSQLHandler(std::shared_ptr<pqxx::connection> conn)
+    : conn_(std::move(conn))
 {
-    if (aDBName.empty()) {
-        cerr << "PSQLHandler::connectToDB: aDBName can not be empty" << endl;
-        return 1;
-        // NOTREACHED
+    if (!conn_ || !conn_->is_open()) {
+        throw std::invalid_argument("PSQLHandler: Invalid or closed connection");
     }
 
-    string conStr("dbname=" + aDBName);
-    if (!aHostName.empty()) conStr.append(" host="     + aHostName);
-    if (!aUserName.empty()) conStr.append(" user="     + aUserName);
-    if (!aDBPass.empty())   conStr.append(" password=" + aDBPass  );
-
-    try {
-        *aCon = new connection(conStr);
-    } catch (const sql_error &e) {
-        cerr << e.what() << endl;
-        return 2;
-        // NOTREACHED
-    }
-
-    return 0;
+    conn_->prepare("fetch_pw",
+                   "SELECT globalid, password FROM transports "
+                   "WHERE gd = $1 ORDER BY registration_time DESC LIMIT 1");
+    conn_->prepare("add_sensor",
+                   "INSERT INTO transports(compname, id, gd, name, last_time, lat, lon, registration_time) "
+                   "VALUES ('logiston', 0, $1, '', 0, 0, 0, $2) RETURNING globalid");
+    conn_->prepare("get_trans_id",
+                   "SELECT globalid FROM transports WHERE gd = $1");
+    conn_->prepare(
+    "insert_point",
+    "INSERT INTO points(transpid,lat,lon,alt,time,speed,direction,sc,signal) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)"
+);
 }
 
-/*!
- * \brief PSQLHandler::getCryptedPassword
- * \param anImei
- * \param xact
- * \return hash of user password and his id in db
- */
-AuthData PSQLHandler::getCryptedPassword(string anImei, work &xact) {
-    stringstream           query;
-    result                 res;
-    result::const_iterator row;
-    int                    transportID;
-    AuthData               toReturn;
-
-    toReturn.transportID       = -1;
-    toReturn.passwordHash = "";
-
-    // first - get account id from sensors table according to anImei
-    query << "SELECT globalid FROM transports WHERE gd = '" << anImei << "'"
-          << endl << "ORDER BY registration_time DESC"
-          << endl << "LIMIT 1";
-
-    try                        { res = xact.exec(query);   }
-    catch (const sql_error &e) { cerr << e.what() << endl; }
-
-    if (!res.size()) return toReturn;
-    // NOTREACHED
-
-    row    = res.begin();
-//    accID  = row["accid"].as<int>();
-    transportID = row["globalid"].as<int>();
-
-//    query.str("");
-
-    // second - get password from accounts table if imei was registered at all
-//    query << "SELECT password FROM accounts WHERE ID = " << accID;
-
-//    try                        { res = xact.exec(query);   }
-//    catch (const sql_error &e) { cerr << e.what() << endl; }
-
-//    if (!res.size()) return toReturn;
-    // NOTREACHED
-
-//    row = res.begin();
-
-    toReturn.transportID       = transportID;
-    toReturn.passwordHash = "";
-
-    BOOST_LOG(logger) << "PSQLHandler::getCryptedPassword transportID " << transportID;
-
-    return toReturn;
+AuthData PSQLHandler::fetchPassword(const std::string& imei, pqxx::work& tx) {
+    AuthData result{ -1, "" };
+    pqxx::result r = tx.exec_prepared("fetch_pw", imei);
+    if (r.empty()) return result;
+    result.transportID = r[0]["globalid"].as<int>();
+    result.passwordHash = r[0]["password"].c_str();
+    BOOST_LOG(logger) << "Fetched password for transportID " << result.transportID;
+    return result;
 }
 
-AuthData PSQLHandler::addSensor(string anImei, work &xact) {
-    AuthData toReturn;
-    
-//    toReturn.userID = accID;
-    toReturn.passwordHash = "";
-
-    long now = time(0);
-    
-    stringstream query;
-    query << " INSERT INTO transports(compname, id, gd, name, last_time, lat, lon, registration_time) ";
-    query << " VALUES ('logiston', 0, '" << anImei << "', '', 0, 0, 0, " << now << ") ";
-//    query << " INSERT INTO transports(compname, id, gd, name, last_time, lat, lon) ";
-//    query << " VALUES ('logiston', 0, '" << anImei << "', '', 0, 0, 0 ) ";
-    query << " RETURNING ID;";
-    
-    try {
-        
-        pqxx::result res = xact.exec(query);
-        toReturn.transportID = res[0][0].as<int>();
-        xact.commit();
-    } catch (const sql_error &e) {
-        BOOST_LOG(logger) << "Error: " << e.what();
-        BOOST_LOG(logger) << "   SQL occure error: " << query.str() << endl; 
+AuthData PSQLHandler::addSensor(const std::string& imei, pqxx::work& tx) {
+    long now = std::time(nullptr);
+    pqxx::result r = tx.exec_prepared("add_sensor", imei, now);
+    if (r.empty()) {
+        throw std::runtime_error("Empty result on addSensor");
     }
-    BOOST_LOG(logger) << "PSQLHandler::addSensor toReturn.transportID " << toReturn.transportID;
-
-    
-    return toReturn;
+    AuthData result;
+    result.transportID = r[0][0].as<int>();
+    result.passwordHash = "";
+    BOOST_LOG(logger) << "Inserted new sensor, transportID " << result.transportID;
+    return result;
 }
 
 
-int PSQLHandler::getTransportID(string anImei, work &xact) {
-    result res;
-    result::const_iterator row;
-
-    stringstream query;
-    query << "SELECT globalid FROM transports WHERE gd = '" << anImei << "'";
-
-    try {
-        res = xact.exec(query);
+int PSQLHandler::getTransportID(const std::string& imei, pqxx::work& tx) {
+    pqxx::result r = tx.exec_prepared("get_trans_id", imei);
+    if (r.empty()) {
+        throw std::runtime_error("Transport ID not found for IMEI: " + imei);
     }
-    catch (const sql_error &e) {
-        cerr << e.what() << endl;
-    }
-
-    row = res.begin();
-    return row["globalid"].as<int>();
+    return r[0][0].as<int>();
 }
 
+void PSQLHandler::uploadPoints(const std::vector<Point>& points, pqxx::work& tx) {
+    if (points.empty()) return;
 
-/*!
- * \brief PSQLHandler::uploadPoints
- * \param thePoints
- * \param xact
- * \return 0
- */
-short
-PSQLHandler::uploadPoints(vector< Point > thePoints, work &xact) {
-    stringstream           query;
-    result                 res;
-    result::const_iterator row;
-    int                    i, len;
-    Point*                 p;
-
-    query   << "INSERT INTO points("
-    << endl << "transpid, lat, lon, alt, time, speed, direction, sc, signal"
-    << endl << ") VALUES"
-    << endl;
-
-    len = thePoints.size();
-    
-//    long now = time(0);
-
-    for (i = 0; i < len; i++) {
-        p = &thePoints[i];
-
-        if (0 != i) query << ",";
-
-        query   << "("
-        << endl << "  " << p->transportID
-        << endl << ", " << p->lat
-        << endl << ", " << p->lon
-        << endl << ", " << p->alt
-        << endl << ", " << p->time
-        << endl << ", " << p->speed
-        << endl << ", " << p->direction
-        << endl << ", " << p->satcnt
-        << endl << ", " << ((p->signal) ? "TRUE" : "FALSE")
-//        << endl << ", " << now
-        << endl << ")";
+    for (const auto &p : points) {
+        tx.exec_prepared(
+            "insert_point",
+            p.transportID,
+            p.lat,
+            p.lon,
+            p.alt,
+            p.time,
+            p.speed,
+            p.direction,
+            p.satcnt,
+            p.signal
+        );
     }
-    if (len > 0) {
-        query << ";"
-            << endl << "update transports set last_time=p.time, lat=p.lat, lon=p.lon, speed=p.speed, direction=p.direction "
-            << endl << "from points p"
-            << endl << "where transpid=globalid "
-            << endl << "and p.time=(select time from points where transpid=globalid order by time desc limit 1)"
-            << endl << "and p.time!=last_time;";
-    }
-
-    // DEBUG
-    //cout << query.str() << endl;
-
-    try { 
-        res = xact.exec(query); 
-        xact.commit();
-    }
-    catch (const sql_error &e) { 
-        BOOST_LOG(logger) << getTimeString() << "Error: " << e.what();
-        BOOST_LOG(logger) << "   SQL occure error: " << query.str() << endl;
-    }
-
-    return 0;
+    BOOST_LOG(logger) << "Bulk uploaded " << points.size() << " points.";
+    BOOST_LOG(logger) << "Bulk uploaded " << points.size() << " points.";
 }
-
-//
-//
-//

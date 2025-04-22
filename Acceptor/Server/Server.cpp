@@ -39,10 +39,13 @@ Server::Server(const ServerConfig& aConfig)
     if (!writeCon_->is_open()) {
         throw std::runtime_error("Failed to open write DB connection");
     }
+
+    auto readHandler = std::make_shared<PSQLHandler>(readCon_);
+    auto writeHandler = std::make_shared<PSQLHandler>(writeCon_);
     
     // Resolve endpoint and start acceptor
     tcp::resolver resolver(ios_);
-    auto endpoints = resolver.resolve({aConfig.host, aConfig.port});
+    const auto endpoints = resolver.resolve({aConfig.host, aConfig.port});
     
     acceptor_.open(endpoints->endpoint().protocol());
     acceptor_.set_option(tcp::acceptor::reuse_address(true));
