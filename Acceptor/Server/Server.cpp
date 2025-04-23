@@ -20,9 +20,11 @@ Server::Server(const ServerConfig& aConfig)
     signals_.add(SIGQUIT);
 #endif // defined(SIGQUIT)
     
-    signals_.async_wait([this](auto&&){ handleStop(); });
+    signals_.async_wait([this](const boost::system::error_code& ec, int signal_number) {
+    handleStop();
+});
     
-    readCon_  = std::make_unique<pqxx::connection>(
+    std::shared_ptr readCon_  = std::make_unique<pqxx::connection>(
                   "dbname="  + aConfig.psqlDbName +
                   " host="   + aConfig.psqlHost  +
                   " user="   + aConfig.psqlLogin +
@@ -31,7 +33,7 @@ Server::Server(const ServerConfig& aConfig)
         throw std::runtime_error("Failed to open read DB connection");
     }
 
-    writeCon_ = std::make_unique<pqxx::connection>(
+    std::shared_ptr writeCon_ = std::make_unique<pqxx::connection>(
                   "dbname="  + aConfig.psqlDbName +
                   " host="   + aConfig.psqlHost  +
                   " user="   + aConfig.psqlLogin +
@@ -40,8 +42,8 @@ Server::Server(const ServerConfig& aConfig)
         throw std::runtime_error("Failed to open write DB connection");
     }
 
-    auto readHandler = std::make_shared<PSQLHandler>(readCon_);
-    auto writeHandler = std::make_shared<PSQLHandler>(writeCon_);
+    readHandler_ = std::make_shared<PSQLHandler>(readCon_);
+    writeHandler_ = std::make_shared<PSQLHandler>(writeCon_);
     
     // Resolve endpoint and start acceptor
     tcp::resolver resolver(ios_);
@@ -51,12 +53,8 @@ Server::Server(const ServerConfig& aConfig)
     acceptor_.set_option(tcp::acceptor::reuse_address(true));
     acceptor_.bind(endpoints->endpoint());
     acceptor_.listen();
-    
-    storage_ = std::make_unique<DataStorage>(
-        readCon_,
-        writeCon_
-    );
 
+    storage_ = std::make_unique<DataStorage>(writeHandler_);
     storage_->start();
     
     startAccept();
@@ -67,11 +65,8 @@ void Server::run() {
 }
 
 void Server::startAccept() {
-    newConnection_ = std::make_shared<Connection>(
-       ios_,
-       std::make_shared<Authorization>(
-           readCon_.get(), writeCon_.get(), &mutex_),
-            storage_.get());
+    auto auth = std::make_shared<Authorization>(readHandler_, &mutex_);
+    newConnection_ = std::make_shared<Connection>(ios_, auth, storage_.get());
 
     acceptor_.async_accept(
         newConnection_->socket(),

@@ -23,8 +23,8 @@ Authorization::Authorization(std::shared_ptr<PSQLHandler> handler,
 bool Authorization::authorize(const std::string& imei,
                               const std::string& password)
 {
-    std::lock_guard<std::mutex> lock(*_mutex);
-    // Open a transaction
+    std::lock_guard lock(*_mutex);
+
     const auto conn = _psql->connection();
     pqxx::work tx(*conn);
 
@@ -34,7 +34,7 @@ bool Authorization::authorize(const std::string& imei,
         data = _psql->addSensor(imei, tx);
     }
 
-    // 2) (Placeholder) password verification logic
+    // (Placeholder) password verification logic
     // std::string dbHash = data.passwordHash;
     // std::string resultHash = crypt(password.c_str(), dbHash.c_str());
     // bool ok = (dbHash == resultHash);
@@ -46,7 +46,6 @@ bool Authorization::authorize(const std::string& imei,
         return false;
     }
 
-    // Commit any new sensor insertion
     tx.commit();
 
     _imei = imei;

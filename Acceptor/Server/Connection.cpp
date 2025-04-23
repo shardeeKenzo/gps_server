@@ -61,14 +61,14 @@ void Connection::hangUp() {
 
 void Connection::handleRead(const boost::system::error_code& e, size_t bytesTransferred) {
     if (e) { 
-	BOOST_LOG(logger) << getTimeString() << _auth->_imei << " Error: " << e.message() << endl << endl;
+	BOOST_LOG(logger) << getTimeString() << _auth->imei() << " Error: " << e.message() << endl << endl;
         return;
     }
     // NOTREACHED
     
     string request = string(_buffer.data()).substr(0, bytesTransferred);
     
-    BOOST_LOG(logger) << getTimeString() << _auth->_imei << " Request from " << _socket.remote_endpoint().address().to_string() << ": " << request;
+    BOOST_LOG(logger) << getTimeString() << _auth->imei() << " Request from " << _socket.remote_endpoint().address().to_string() << ": " << request;
     //cout << endl << "--" << endl << "--" << endl
     //     << getTimeString() << "tcp request: " << request << endl;
     
@@ -77,7 +77,7 @@ void Connection::handleRead(const boost::system::error_code& e, size_t bytesTran
         request = _request + request;
         _request = "";
     } else {
-	BOOST_LOG(logger) << getTimeString() << _auth->_imei << " Wrong end of request!" << endl << request;
+	BOOST_LOG(logger) << getTimeString() << _auth->imei() << " Wrong end of request!" << endl << request;
         _request += request;
         listen();
         return;
@@ -114,7 +114,7 @@ void Connection::processingRequest(string request) {
     if (!mapsCnt || !tokenMap.count("requestType") || !tokenMap.size()) {
         //cout << endl << "    !an error during parsing has occurred!" << endl;
         
-	BOOST_LOG(logger) << getTimeString() << _auth->_imei << " Error: Wrong request!" << endl;
+	BOOST_LOG(logger) << getTimeString() << _auth->imei() << " Error: Wrong request!" << endl;
 
         return;
     }
@@ -134,7 +134,7 @@ void Connection::processingRequest(string request) {
     //BOOST_LOG(logger) << getTimeString() << imei << ": "<< "Packet type: " << tokenMap["requestType"];
     
     // do not process the signal if there was no previous authorization
-    if (!_auth->_authorized && WialonIPS::L_LOGIN != reqType) {
+    if (!_auth->isAuthorized() && WialonIPS::L_LOGIN != reqType) {
         reqType = WialonIPS::UNDEFINED_REQ;
     }
     
@@ -154,35 +154,35 @@ void Connection::processingRequest(string request) {
             
         case WialonIPS::P_PING:
             //cout << " - WialonIPS::P_PING" << endl;
-	    BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Request type: Ping.";
+	    BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Request type: Ping.";
             
             answer = _parser->answer(WialonIPS::P_PING, res);
             break;
             
         case WialonIPS::D_DATA:
             //cout << " - WialonIPS::D_DATA" << endl;
-	    BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Request type: Data.";
+	    BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Request type: Data.";
 
-            res = _storage->store(_auth->_transportID, tokenMap);
+            res = _storage->store(_auth->transportID(), tokenMap);
             answer = _parser->answer(WialonIPS::D_DATA, res);
             break;
             
         case WialonIPS::SD_SHORT_DATA:
             //cout << " - WialonIPS::SD_SHORT_DATA" << endl;
-	    BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Request type: Short data.";
+	    BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Request type: Short data.";
             
-            res = _storage->store(_auth->_transportID, tokenMap);
+            res = _storage->store(_auth->transportID(), tokenMap);
             answer = _parser->answer(WialonIPS::SD_SHORT_DATA, res);
             break;
             
         case WialonIPS::B_BLACK_BOX:
             //cout << " - WialonIPS::B_BLACK_BOX" << endl;
-	    BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Request type: Black box.";
+	    BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Request type: Black box.";
             
             // iterate through all tokens(maps) in vector
             for (i = 0; i < mapsCnt; i++) {
                 tokenMap = maps[i];
-                if (!_storage->store(_auth->_transportID, tokenMap)) continue;
+                if (!_storage->store(_auth->transportID(), tokenMap)) continue;
                 // LOOP VIOLATION
                 
                 successfulTransfers++;
@@ -211,7 +211,7 @@ void Connection::processingRequest(string request) {
     );
     
     //cout << endl << getTimeString() << " answer sent: " << answer << endl;
-    BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Sent answer: " << answer;
+    BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Sent answer: " << answer;
 
     // continue session
     if(!endConnection) {
@@ -219,7 +219,7 @@ void Connection::processingRequest(string request) {
         listen();
     }
     else {
-	BOOST_LOG(logger) << getTimeString() << _auth->_imei << ": " << "Close connection." << endl;
+	BOOST_LOG(logger) << getTimeString() << _auth->imei() << ": " << "Close connection." << endl;
     }
     
 }

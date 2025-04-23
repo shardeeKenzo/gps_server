@@ -5,26 +5,20 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
-#include <PSQLHandler.h>
 #include <thread>
 #include <vector>
+#include <memory>
 
-#include <pqxx/pqxx>
-
+#include "PSQLHandler.h"
 #include "DataTypes.h"
 
-using namespace std;
 
 /// Buffers incoming GPS points in memory and periodically flushes them to PostgreDB.
 class DataStorage
 {
 public:
-    /// @param readCon   Shared connection for reads.
-    /// @param writeCon  Shared connection for writes.
-    /// @param flushInterval How often to flush the buffer to the database.
-    DataStorage(std::shared_ptr<pqxx::connection> readCon,
-                std::shared_ptr<pqxx::connection> writeCon,
-                std::chrono::seconds flushInterval = std::chrono::seconds(15));
+    explicit DataStorage(std::shared_ptr<PSQLHandler> writeHandler_,
+                std::chrono::seconds flushInterval_ = std::chrono::seconds(15));
 
     ~DataStorage();
     
@@ -46,15 +40,11 @@ private:
     /// Flush the current buffer to the database (called under lock).
     void uploadPoints();
 
-    std::shared_ptr<pqxx::connection> writeCon_;
-    std::shared_ptr<pqxx::connection> readCon_;
+    std::shared_ptr<PSQLHandler>      psql_;
     std::mutex                        mutex_;
     std::condition_variable           cv_;
     std::thread                       thread_;
     bool                              running_;
-
-    PSQLHandler                       psql_;
-
 
     std::chrono::seconds              flushInterval_;
     std::vector<Point>                points_;

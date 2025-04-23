@@ -1,18 +1,16 @@
 #include "DataStorage.h"
-#include "PSQLHandler.h"
 #include "Logger.hpp"
 #include "utils.hpp"
 
 DataStorage::DataStorage(
-    std::shared_ptr<pqxx::connection> readCon,
-    std::shared_ptr<pqxx::connection> writeCon,
-    const std::chrono::seconds flushInterval)
-    : writeCon_{std::move(writeCon)}
-      , running_{false}
-      , psql_{ writeCon_ }
-      ,flushInterval_{flushInterval} {
-    if (!writeCon_ || !writeCon_->is_open()) {
-        throw std::invalid_argument("DataStorage: invalid writeCon");
+    std::shared_ptr<PSQLHandler> writeHandler_,
+    const std::chrono::seconds flushInterval_)
+  : psql_{std::move(writeHandler_)}
+, running_{false}
+, flushInterval_{flushInterval_}
+{
+    if (!psql_ || !psql_->connection() || !psql_->connection()->is_open()) {
+        throw std::invalid_argument("DataStorage: invalid write handler");
     }
 }
 
@@ -21,7 +19,7 @@ DataStorage::~DataStorage() {
 }
 
 void DataStorage::run() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     while (running_) {
         // Wake on timeout or new data/stop
         cv_.wait_for(lock, flushInterval_, [this] {
@@ -36,8 +34,8 @@ void DataStorage::run() {
 
             // Perform upload
             try {
-                pqxx::work xact(*writeCon_);
-                psql_.uploadPoints(toUpload, xact);
+                pqxx::work xact(*psql_->connection());
+                psql_->uploadPoints(toUpload, xact);
                 xact.commit();
                 BOOST_LOG(logger) << getTimeString()
                                   << " Uploaded " << toUpload.size()
@@ -118,8 +116,8 @@ void DataStorage::uploadPoints() {
     }
 
     try {
-        pqxx::work xact(*writeCon_);
-        psql_.uploadPoints(toUpload, xact);
+        pqxx::work xact(*psql_->connection());
+        psql_->uploadPoints(toUpload, xact);
         xact.commit();
         BOOST_LOG(logger) << getTimeString()
                           << " Final upload of " << toUpload.size()
